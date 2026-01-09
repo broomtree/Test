@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>3D 우주 탐험 게임</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            font-family: Arial, sans-serif;
+        }
+
+        canvas {
+            display: block;
+        }
+
+        #info {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            color: white;
+            background: rgba(0, 0, 0, 0.7);
+            padding: 15px;
+            border-radius: 10px;
+            font-size: 14px;
+            z-index: 100;
+        }
+
+        #info h2 {
+            margin-top: 0;
+            color: #00ffff;
+        }
+
+        #info p {
+            margin: 5px 0;
+        }
+
+        #loading {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            color: white;
+            font-size: 24px;
+            text-align: center;
+        }
+
+        .hidden {
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <div id="loading">우주 탐험 준비 중...</div>
+
+    <div id="info">
+        <h2>🚀 우주 탐험 게임</h2>
+        <p><strong>조작법:</strong></p>
+        <p>🖱️ 마우스 드래그: 시점 회전</p>
+        <p>⌨️ W/S: 앞/뒤로 이동</p>
+        <p>⌨️ A/D: 왼쪽/오른쪽 이동</p>
+        <p>⌨️ Space/Shift: 위/아래 이동</p>
+        <p>⌨️ Q/E: 좌/우 회전</p>
+        <p>📊 속도: <span id="speed">0</span></p>
+        <p>📍 위치: <span id="position">0, 0, 0</span></p>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="game.js"></script>
+</body>
+</html>
