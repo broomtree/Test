@@ -1,402 +1,591 @@
-// Three.js 3D 우주 탐험 게임
+// 순수 JavaScript로 만든 3D 우주 탐험 게임
+// 외부 라이브러리 없이 Canvas 2D API로 3D 효과 구현
 
-let scene, camera, renderer;
-let stars = [];
-let planets = [];
-let asteroids = [];
-let nebulas = [];
-let velocity = new THREE.Vector3();
-let rotation = new THREE.Euler();
+class Vector3 {
+    constructor(x = 0, y = 0, z = 0) {
+        this.x = x;
+        this.y = y;
+        this.z = z;
+    }
 
-// 조작 키
-const keys = {
-    w: false, s: false, a: false, d: false,
-    space: false, shift: false, q: false, e: false
-};
+    add(v) {
+        this.x += v.x;
+        this.y += v.y;
+        this.z += v.z;
+        return this;
+    }
 
-// 마우스 컨트롤
-let isDragging = false;
-let previousMousePosition = { x: 0, y: 0 };
+    subtract(v) {
+        return new Vector3(this.x - v.x, this.y - v.y, this.z - v.z);
+    }
 
-// 게임 설정
-const config = {
-    moveSpeed: 0.5,
-    rotateSpeed: 0.02,
-    maxSpeed: 2.0,
-    friction: 0.98
-};
+    multiply(scalar) {
+        this.x *= scalar;
+        this.y *= scalar;
+        this.z *= scalar;
+        return this;
+    }
 
-// 초기화
-function init() {
-    // Scene 생성
-    scene = new THREE.Scene();
-    scene.fog = new THREE.FogExp2(0x000000, 0.0001);
+    length() {
+        return Math.sqrt(this.x * this.x + this.y * this.y + this.z * this.z);
+    }
 
-    // Camera 생성
-    camera = new THREE.PerspectiveCamera(
-        75,
-        window.innerWidth / window.innerHeight,
-        0.1,
-        10000
-    );
-    camera.position.set(0, 0, 0);
+    normalize() {
+        const len = this.length();
+        if (len > 0) {
+            this.multiply(1 / len);
+        }
+        return this;
+    }
 
-    // Renderer 생성
-    renderer = new THREE.WebGLRenderer({ antialias: true });
-    renderer.setSize(window.innerWidth, window.innerHeight);
-    renderer.setClearColor(0x000000);
-    document.body.appendChild(renderer.domElement);
+    clone() {
+        return new Vector3(this.x, this.y, this.z);
+    }
 
-    // 조명 추가
-    const ambientLight = new THREE.AmbientLight(0x333333);
-    scene.add(ambientLight);
+    dot(v) {
+        return this.x * v.x + this.y * v.y + this.z * v.z;
+    }
 
-    // 별 생성
-    createStarfield();
-
-    // 행성 생성
-    createPlanets();
-
-    // 소행성 생성
-    createAsteroids();
-
-    // 성운 생성
-    createNebulas();
-
-    // 이벤트 리스너
-    setupEventListeners();
-
-    // 로딩 완료
-    document.getElementById('loading').classList.add('hidden');
-
-    // 애니메이션 시작
-    animate();
+    cross(v) {
+        return new Vector3(
+            this.y * v.z - this.z * v.y,
+            this.z * v.x - this.x * v.z,
+            this.x * v.y - this.y * v.x
+        );
+    }
 }
 
-// 별 생성
-function createStarfield() {
-    const starGeometry = new THREE.BufferGeometry();
-    const starCount = 10000;
-    const positions = new Float32Array(starCount * 3);
-    const colors = new Float32Array(starCount * 3);
+class Camera {
+    constructor() {
+        this.position = new Vector3(0, 0, 0);
+        this.rotation = new Vector3(0, 0, 0);
+        this.velocity = new Vector3(0, 0, 0);
+        this.fov = 90;
+        this.near = 0.1;
+        this.far = 10000;
+    }
 
-    for (let i = 0; i < starCount; i++) {
-        const i3 = i * 3;
+    getForward() {
+        const pitch = this.rotation.x;
+        const yaw = this.rotation.y;
+        return new Vector3(
+            Math.sin(yaw) * Math.cos(pitch),
+            Math.sin(pitch),
+            -Math.cos(yaw) * Math.cos(pitch)
+        );
+    }
 
-        // 랜덤 위치 (-5000 ~ 5000 범위)
-        positions[i3] = (Math.random() - 0.5) * 10000;
-        positions[i3 + 1] = (Math.random() - 0.5) * 10000;
-        positions[i3 + 2] = (Math.random() - 0.5) * 10000;
+    getRight() {
+        const yaw = this.rotation.y;
+        return new Vector3(Math.cos(yaw), 0, Math.sin(yaw));
+    }
 
-        // 랜덤 색상 (흰색에서 파란색, 노란색 계열)
-        const colorType = Math.random();
-        if (colorType < 0.7) {
-            colors[i3] = 1;
-            colors[i3 + 1] = 1;
-            colors[i3 + 2] = 1;
-        } else if (colorType < 0.85) {
-            colors[i3] = 0.8 + Math.random() * 0.2;
-            colors[i3 + 1] = 0.8 + Math.random() * 0.2;
-            colors[i3 + 2] = 1;
-        } else {
-            colors[i3] = 1;
-            colors[i3 + 1] = 0.9 + Math.random() * 0.1;
-            colors[i3 + 2] = 0.6 + Math.random() * 0.2;
+    getUp() {
+        const forward = this.getForward();
+        const right = this.getRight();
+        return right.cross(forward);
+    }
+}
+
+class SpaceObject {
+    constructor(x, y, z, type = 'star') {
+        this.position = new Vector3(x, y, z);
+        this.type = type;
+        this.rotation = new Vector3(
+            Math.random() * Math.PI * 2,
+            Math.random() * Math.PI * 2,
+            Math.random() * Math.PI * 2
+        );
+        this.rotationSpeed = new Vector3(
+            (Math.random() - 0.5) * 0.02,
+            (Math.random() - 0.5) * 0.02,
+            (Math.random() - 0.5) * 0.02
+        );
+
+        if (type === 'star') {
+            this.size = Math.random() * 1.5 + 0.5;
+            const colorChoice = Math.random();
+            if (colorChoice < 0.7) {
+                this.color = '#ffffff';
+            } else if (colorChoice < 0.85) {
+                this.color = '#aabbff';
+            } else {
+                this.color = '#ffeeaa';
+            }
+            this.brightness = Math.random() * 0.5 + 0.5;
+        } else if (type === 'planet') {
+            this.size = Math.random() * 40 + 20;
+            const colors = ['#ff6b35', '#4ecdc4', '#f7b731', '#5f27cd', '#ee5a6f', '#00d2d3', '#f368e0', '#ff9ff3'];
+            this.color = colors[Math.floor(Math.random() * colors.length)];
+            this.hasRing = Math.random() > 0.5;
+            this.ringColor = this.adjustColor(this.color, 0.7);
+        } else if (type === 'asteroid') {
+            this.size = Math.random() * 3 + 1;
+            this.color = '#888888';
+            this.shape = Math.floor(Math.random() * 3); // 다양한 모양
+        } else if (type === 'nebula') {
+            this.size = Math.random() * 300 + 200;
+            const colors = ['#ff006e', '#8338ec', '#3a86ff', '#fb5607'];
+            this.color = colors[Math.floor(Math.random() * colors.length)];
         }
     }
 
-    starGeometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-    starGeometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+    adjustColor(color, factor) {
+        const hex = color.replace('#', '');
+        const r = Math.floor(parseInt(hex.substr(0, 2), 16) * factor);
+        const g = Math.floor(parseInt(hex.substr(2, 2), 16) * factor);
+        const b = Math.floor(parseInt(hex.substr(4, 2), 16) * factor);
+        return `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`;
+    }
 
-    const starMaterial = new THREE.PointsMaterial({
-        size: 2,
-        vertexColors: true,
-        transparent: true,
-        opacity: 0.8
-    });
-
-    const starField = new THREE.Points(starGeometry, starMaterial);
-    scene.add(starField);
-    stars.push(starField);
+    update() {
+        this.rotation.add(this.rotationSpeed);
+    }
 }
 
-// 행성 생성
-function createPlanets() {
-    const planetConfigs = [
-        { radius: 50, color: 0xff6b35, position: [300, 100, -500], hasRing: false },
-        { radius: 80, color: 0x4ecdc4, position: [-600, -200, -800], hasRing: true },
-        { radius: 40, color: 0xf7b731, position: [800, 300, -1200], hasRing: false },
-        { radius: 100, color: 0x5f27cd, position: [-400, 500, -1500], hasRing: true },
-        { radius: 60, color: 0xee5a6f, position: [1000, -400, -2000], hasRing: false },
-        { radius: 35, color: 0x00d2d3, position: [-1200, 200, -1800], hasRing: false },
-        { radius: 90, color: 0xf368e0, position: [500, -600, -2500], hasRing: true },
-        { radius: 45, color: 0xff9ff3, position: [-800, 800, -3000], hasRing: false }
-    ];
-
-    planetConfigs.forEach((config, index) => {
-        // 행성 생성
-        const geometry = new THREE.SphereGeometry(config.radius, 32, 32);
-        const material = new THREE.MeshPhongMaterial({
-            color: config.color,
-            emissive: config.color,
-            emissiveIntensity: 0.2,
-            shininess: 30
-        });
-        const planet = new THREE.Mesh(geometry, material);
-        planet.position.set(...config.position);
-
-        // 회전 속도 랜덤 설정
-        planet.userData.rotationSpeed = {
-            x: Math.random() * 0.001,
-            y: Math.random() * 0.002,
-            z: Math.random() * 0.001
+class Game {
+    constructor() {
+        this.canvas = document.getElementById('gameCanvas');
+        this.ctx = this.canvas.getContext('2d');
+        this.camera = new Camera();
+        this.objects = [];
+        this.keys = {};
+        this.mouse = { x: 0, y: 0, isDragging: false };
+        this.config = {
+            moveSpeed: 1.5,
+            rotateSpeed: 0.002,
+            friction: 0.95,
+            maxSpeed: 5.0
         };
+        this.lastTime = 0;
+        this.fps = 60;
+        this.frameCount = 0;
+        this.lastFpsUpdate = 0;
 
-        scene.add(planet);
-        planets.push(planet);
+        this.resize();
+        this.init();
+    }
 
-        // 링 추가
-        if (config.hasRing) {
-            const ringGeometry = new THREE.RingGeometry(
-                config.radius * 1.5,
-                config.radius * 2.5,
-                64
+    resize() {
+        this.canvas.width = window.innerWidth;
+        this.canvas.height = window.innerHeight;
+        this.centerX = this.canvas.width / 2;
+        this.centerY = this.canvas.height / 2;
+    }
+
+    init() {
+        // 별 생성 (5000개)
+        for (let i = 0; i < 5000; i++) {
+            const x = (Math.random() - 0.5) * 8000;
+            const y = (Math.random() - 0.5) * 8000;
+            const z = (Math.random() - 0.5) * 8000;
+            this.objects.push(new SpaceObject(x, y, z, 'star'));
+        }
+
+        // 행성 생성 (20개)
+        for (let i = 0; i < 20; i++) {
+            const angle = (i / 20) * Math.PI * 2;
+            const distance = 500 + Math.random() * 2000;
+            const x = Math.cos(angle) * distance + (Math.random() - 0.5) * 500;
+            const y = (Math.random() - 0.5) * 1000;
+            const z = Math.sin(angle) * distance + (Math.random() - 0.5) * 500;
+            this.objects.push(new SpaceObject(x, y, z, 'planet'));
+        }
+
+        // 소행성 생성 (300개)
+        for (let i = 0; i < 300; i++) {
+            const x = (Math.random() - 0.5) * 6000;
+            const y = (Math.random() - 0.5) * 6000;
+            const z = (Math.random() - 0.5) * 6000;
+            this.objects.push(new SpaceObject(x, y, z, 'asteroid'));
+        }
+
+        // 성운 생성 (8개)
+        for (let i = 0; i < 8; i++) {
+            const angle = (i / 8) * Math.PI * 2;
+            const distance = 1000 + Math.random() * 2000;
+            const x = Math.cos(angle) * distance;
+            const y = (Math.random() - 0.5) * 1500;
+            const z = Math.sin(angle) * distance;
+            this.objects.push(new SpaceObject(x, y, z, 'nebula'));
+        }
+
+        this.setupEvents();
+        document.getElementById('loading').classList.add('hidden');
+        document.getElementById('objects').textContent = this.objects.length;
+
+        this.animate(0);
+    }
+
+    setupEvents() {
+        // 키보드 이벤트
+        window.addEventListener('keydown', (e) => {
+            this.keys[e.key.toLowerCase()] = true;
+            if (e.key === ' ') e.preventDefault();
+        });
+
+        window.addEventListener('keyup', (e) => {
+            this.keys[e.key.toLowerCase()] = false;
+        });
+
+        // 마우스 이벤트
+        this.canvas.addEventListener('mousedown', (e) => {
+            this.mouse.isDragging = true;
+            this.mouse.x = e.clientX;
+            this.mouse.y = e.clientY;
+            this.canvas.style.cursor = 'grabbing';
+        });
+
+        this.canvas.addEventListener('mousemove', (e) => {
+            if (this.mouse.isDragging) {
+                const deltaX = e.clientX - this.mouse.x;
+                const deltaY = e.clientY - this.mouse.y;
+
+                this.camera.rotation.y += deltaX * this.config.rotateSpeed;
+                this.camera.rotation.x -= deltaY * this.config.rotateSpeed;
+
+                // Pitch 제한
+                this.camera.rotation.x = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, this.camera.rotation.x));
+
+                this.mouse.x = e.clientX;
+                this.mouse.y = e.clientY;
+            }
+        });
+
+        this.canvas.addEventListener('mouseup', () => {
+            this.mouse.isDragging = false;
+            this.canvas.style.cursor = 'grab';
+        });
+
+        this.canvas.addEventListener('mouseleave', () => {
+            this.mouse.isDragging = false;
+            this.canvas.style.cursor = 'default';
+        });
+
+        // 터치 이벤트 (모바일)
+        this.canvas.addEventListener('touchstart', (e) => {
+            if (e.touches.length > 0) {
+                this.mouse.isDragging = true;
+                this.mouse.x = e.touches[0].clientX;
+                this.mouse.y = e.touches[0].clientY;
+                e.preventDefault();
+            }
+        });
+
+        this.canvas.addEventListener('touchmove', (e) => {
+            if (this.mouse.isDragging && e.touches.length > 0) {
+                const deltaX = e.touches[0].clientX - this.mouse.x;
+                const deltaY = e.touches[0].clientY - this.mouse.y;
+
+                this.camera.rotation.y += deltaX * this.config.rotateSpeed;
+                this.camera.rotation.x -= deltaY * this.config.rotateSpeed;
+                this.camera.rotation.x = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, this.camera.rotation.x));
+
+                this.mouse.x = e.touches[0].clientX;
+                this.mouse.y = e.touches[0].clientY;
+                e.preventDefault();
+            }
+        });
+
+        this.canvas.addEventListener('touchend', () => {
+            this.mouse.isDragging = false;
+        });
+
+        // 윈도우 리사이즈
+        window.addEventListener('resize', () => this.resize());
+    }
+
+    updateCamera() {
+        const forward = this.camera.getForward();
+        const right = this.camera.getRight();
+        const up = new Vector3(0, 1, 0);
+
+        // 키 입력에 따른 가속
+        if (this.keys['w']) {
+            this.camera.velocity.add(forward.clone().multiply(this.config.moveSpeed));
+        }
+        if (this.keys['s']) {
+            this.camera.velocity.add(forward.clone().multiply(-this.config.moveSpeed));
+        }
+        if (this.keys['a']) {
+            this.camera.velocity.add(right.clone().multiply(-this.config.moveSpeed));
+        }
+        if (this.keys['d']) {
+            this.camera.velocity.add(right.clone().multiply(this.config.moveSpeed));
+        }
+        if (this.keys[' ']) {
+            this.camera.velocity.add(up.clone().multiply(this.config.moveSpeed));
+        }
+        if (this.keys['shift']) {
+            this.camera.velocity.add(up.clone().multiply(-this.config.moveSpeed));
+        }
+
+        // 롤 회전
+        if (this.keys['q']) {
+            this.camera.rotation.z += 0.02;
+        }
+        if (this.keys['e']) {
+            this.camera.rotation.z -= 0.02;
+        }
+
+        // 속도 제한
+        const speed = this.camera.velocity.length();
+        if (speed > this.config.maxSpeed) {
+            this.camera.velocity.normalize().multiply(this.config.maxSpeed);
+        }
+
+        // 마찰 적용
+        this.camera.velocity.multiply(this.config.friction);
+
+        // 위치 업데이트
+        this.camera.position.add(this.camera.velocity);
+
+        // UI 업데이트
+        this.updateUI();
+    }
+
+    updateUI() {
+        const speed = this.camera.velocity.length();
+        document.getElementById('speed').textContent = speed.toFixed(2);
+        document.getElementById('posX').textContent = Math.floor(this.camera.position.x);
+        document.getElementById('posY').textContent = Math.floor(this.camera.position.y);
+        document.getElementById('posZ').textContent = Math.floor(this.camera.position.z);
+    }
+
+    project(point) {
+        // 카메라 회전 행렬 적용
+        const translated = point.subtract(this.camera.position);
+
+        // 회전 적용 (Yaw, Pitch, Roll)
+        const cosYaw = Math.cos(-this.camera.rotation.y);
+        const sinYaw = Math.sin(-this.camera.rotation.y);
+        const cosPitch = Math.cos(-this.camera.rotation.x);
+        const sinPitch = Math.sin(-this.camera.rotation.x);
+        const cosRoll = Math.cos(-this.camera.rotation.z);
+        const sinRoll = Math.sin(-this.camera.rotation.z);
+
+        // Yaw 회전
+        let x = translated.x * cosYaw - translated.z * sinYaw;
+        let z = translated.x * sinYaw + translated.z * cosYaw;
+        let y = translated.y;
+
+        // Pitch 회전
+        let tempY = y * cosPitch - z * sinPitch;
+        z = y * sinPitch + z * cosPitch;
+        y = tempY;
+
+        // Roll 회전
+        let tempX = x * cosRoll - y * sinRoll;
+        y = x * sinRoll + y * cosRoll;
+        x = tempX;
+
+        // 원근 투영
+        if (z <= 0) return null;
+
+        const scale = (this.canvas.width / 2) / Math.tan(this.camera.fov * Math.PI / 360);
+        const screenX = (x / z) * scale + this.centerX;
+        const screenY = (-y / z) * scale + this.centerY;
+        const depth = z;
+
+        return { x: screenX, y: screenY, z: depth };
+    }
+
+    render() {
+        // 배경 그리기
+        this.ctx.fillStyle = '#000000';
+        this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
+
+        // 객체들을 거리순으로 정렬 (먼 것부터)
+        const projectedObjects = [];
+
+        for (const obj of this.objects) {
+            const projected = this.project(obj.position);
+            if (projected && projected.z > 0 && projected.z < this.camera.far) {
+                projectedObjects.push({ obj, projected });
+            }
+        }
+
+        // 깊이 순 정렬 (먼 것부터)
+        projectedObjects.sort((a, b) => b.projected.z - a.projected.z);
+
+        // 렌더링
+        for (const { obj, projected } of projectedObjects) {
+            const scale = 1000 / projected.z;
+
+            if (obj.type === 'star') {
+                this.renderStar(obj, projected, scale);
+            } else if (obj.type === 'planet') {
+                this.renderPlanet(obj, projected, scale);
+            } else if (obj.type === 'asteroid') {
+                this.renderAsteroid(obj, projected, scale);
+            } else if (obj.type === 'nebula') {
+                this.renderNebula(obj, projected, scale);
+            }
+        }
+    }
+
+    renderStar(obj, projected, scale) {
+        const size = obj.size * scale;
+        if (size < 0.5) return;
+
+        this.ctx.fillStyle = obj.color;
+        this.ctx.globalAlpha = obj.brightness;
+
+        // 별 그리기
+        this.ctx.beginPath();
+        this.ctx.arc(projected.x, projected.y, Math.max(0.5, size), 0, Math.PI * 2);
+        this.ctx.fill();
+
+        // 반짝이는 효과
+        if (size > 1 && Math.random() > 0.95) {
+            this.ctx.globalAlpha = 0.3;
+            this.ctx.beginPath();
+            this.ctx.arc(projected.x, projected.y, size * 2, 0, Math.PI * 2);
+            this.ctx.fill();
+        }
+
+        this.ctx.globalAlpha = 1;
+    }
+
+    renderPlanet(obj, projected, scale) {
+        const size = obj.size * scale;
+        if (size < 1) return;
+
+        // 발광 효과
+        const gradient = this.ctx.createRadialGradient(
+            projected.x, projected.y, 0,
+            projected.x, projected.y, size * 1.5
+        );
+        gradient.addColorStop(0, obj.color);
+        gradient.addColorStop(0.7, obj.color + '88');
+        gradient.addColorStop(1, obj.color + '00');
+
+        this.ctx.fillStyle = gradient;
+        this.ctx.beginPath();
+        this.ctx.arc(projected.x, projected.y, size * 1.5, 0, Math.PI * 2);
+        this.ctx.fill();
+
+        // 행성 본체
+        this.ctx.fillStyle = obj.color;
+        this.ctx.beginPath();
+        this.ctx.arc(projected.x, projected.y, size, 0, Math.PI * 2);
+        this.ctx.fill();
+
+        // 음영 효과
+        const shadowGradient = this.ctx.createRadialGradient(
+            projected.x - size * 0.3, projected.y - size * 0.3, 0,
+            projected.x, projected.y, size
+        );
+        shadowGradient.addColorStop(0, '#ffffff44');
+        shadowGradient.addColorStop(1, '#00000088');
+
+        this.ctx.fillStyle = shadowGradient;
+        this.ctx.beginPath();
+        this.ctx.arc(projected.x, projected.y, size, 0, Math.PI * 2);
+        this.ctx.fill();
+
+        // 링 그리기
+        if (obj.hasRing && size > 3) {
+            this.ctx.strokeStyle = obj.ringColor;
+            this.ctx.lineWidth = size * 0.2;
+            this.ctx.globalAlpha = 0.6;
+
+            this.ctx.beginPath();
+            this.ctx.ellipse(
+                projected.x, projected.y,
+                size * 2, size * 0.5,
+                Math.sin(obj.rotation.y) * 0.5, 0, Math.PI * 2
             );
-            const ringMaterial = new THREE.MeshBasicMaterial({
-                color: config.color,
-                side: THREE.DoubleSide,
-                transparent: true,
-                opacity: 0.6
-            });
-            const ring = new THREE.Mesh(ringGeometry, ringMaterial);
-            ring.rotation.x = Math.PI / 2;
-            planet.add(ring);
+            this.ctx.stroke();
+
+            this.ctx.globalAlpha = 1;
         }
-
-        // 발광 효과 추가
-        const glowGeometry = new THREE.SphereGeometry(config.radius * 1.1, 32, 32);
-        const glowMaterial = new THREE.MeshBasicMaterial({
-            color: config.color,
-            transparent: true,
-            opacity: 0.1
-        });
-        const glow = new THREE.Mesh(glowGeometry, glowMaterial);
-        planet.add(glow);
-
-        // 포인트 라이트 추가
-        const light = new THREE.PointLight(config.color, 1, 500);
-        planet.add(light);
-    });
-}
-
-// 소행성 생성
-function createAsteroids() {
-    const asteroidCount = 200;
-
-    for (let i = 0; i < asteroidCount; i++) {
-        const size = Math.random() * 5 + 2;
-        const geometry = new THREE.DodecahedronGeometry(size);
-        const material = new THREE.MeshPhongMaterial({
-            color: 0x808080,
-            flatShading: true
-        });
-        const asteroid = new THREE.Mesh(geometry, material);
-
-        // 랜덤 위치
-        asteroid.position.set(
-            (Math.random() - 0.5) * 5000,
-            (Math.random() - 0.5) * 5000,
-            (Math.random() - 0.5) * 5000
-        );
-
-        // 랜덤 회전
-        asteroid.rotation.set(
-            Math.random() * Math.PI,
-            Math.random() * Math.PI,
-            Math.random() * Math.PI
-        );
-
-        // 회전 속도
-        asteroid.userData.rotationSpeed = {
-            x: (Math.random() - 0.5) * 0.02,
-            y: (Math.random() - 0.5) * 0.02,
-            z: (Math.random() - 0.5) * 0.02
-        };
-
-        scene.add(asteroid);
-        asteroids.push(asteroid);
-    }
-}
-
-// 성운 생성
-function createNebulas() {
-    const nebulaConfigs = [
-        { color: 0xff006e, position: [1500, 500, -3000], size: 400 },
-        { color: 0x8338ec, position: [-2000, -800, -4000], size: 500 },
-        { color: 0x3a86ff, position: [2500, 1000, -5000], size: 600 },
-        { color: 0xfb5607, position: [-1800, 600, -3500], size: 450 }
-    ];
-
-    nebulaConfigs.forEach(config => {
-        const geometry = new THREE.SphereGeometry(config.size, 32, 32);
-        const material = new THREE.MeshBasicMaterial({
-            color: config.color,
-            transparent: true,
-            opacity: 0.05,
-            side: THREE.BackSide
-        });
-        const nebula = new THREE.Mesh(geometry, material);
-        nebula.position.set(...config.position);
-
-        scene.add(nebula);
-        nebulas.push(nebula);
-    });
-}
-
-// 이벤트 리스너 설정
-function setupEventListeners() {
-    // 키보드 이벤트
-    document.addEventListener('keydown', (e) => {
-        switch(e.key.toLowerCase()) {
-            case 'w': keys.w = true; break;
-            case 's': keys.s = true; break;
-            case 'a': keys.a = true; break;
-            case 'd': keys.d = true; break;
-            case ' ': keys.space = true; e.preventDefault(); break;
-            case 'shift': keys.shift = true; break;
-            case 'q': keys.q = true; break;
-            case 'e': keys.e = true; break;
-        }
-    });
-
-    document.addEventListener('keyup', (e) => {
-        switch(e.key.toLowerCase()) {
-            case 'w': keys.w = false; break;
-            case 's': keys.s = false; break;
-            case 'a': keys.a = false; break;
-            case 'd': keys.d = false; break;
-            case ' ': keys.space = false; break;
-            case 'shift': keys.shift = false; break;
-            case 'q': keys.q = false; break;
-            case 'e': keys.e = false; break;
-        }
-    });
-
-    // 마우스 이벤트
-    renderer.domElement.addEventListener('mousedown', (e) => {
-        isDragging = true;
-        previousMousePosition = { x: e.clientX, y: e.clientY };
-    });
-
-    renderer.domElement.addEventListener('mousemove', (e) => {
-        if (isDragging) {
-            const deltaX = e.clientX - previousMousePosition.x;
-            const deltaY = e.clientY - previousMousePosition.y;
-
-            rotation.y -= deltaX * 0.005;
-            rotation.x -= deltaY * 0.005;
-
-            // X축 회전 제한
-            rotation.x = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, rotation.x));
-
-            previousMousePosition = { x: e.clientX, y: e.clientY };
-        }
-    });
-
-    renderer.domElement.addEventListener('mouseup', () => {
-        isDragging = false;
-    });
-
-    renderer.domElement.addEventListener('mouseleave', () => {
-        isDragging = false;
-    });
-
-    // 윈도우 리사이즈
-    window.addEventListener('resize', () => {
-        camera.aspect = window.innerWidth / window.innerHeight;
-        camera.updateProjectionMatrix();
-        renderer.setSize(window.innerWidth, window.innerHeight);
-    });
-}
-
-// 움직임 업데이트
-function updateMovement() {
-    // 회전 적용
-    camera.rotation.x = rotation.x;
-    camera.rotation.y = rotation.y;
-    camera.rotation.z = rotation.z;
-
-    // Q/E 키로 Z축 회전
-    if (keys.q) rotation.z += config.rotateSpeed;
-    if (keys.e) rotation.z -= config.rotateSpeed;
-
-    // 이동 방향 계산
-    const direction = new THREE.Vector3();
-
-    if (keys.w) direction.z -= 1;
-    if (keys.s) direction.z += 1;
-    if (keys.a) direction.x -= 1;
-    if (keys.d) direction.x += 1;
-    if (keys.space) direction.y += 1;
-    if (keys.shift) direction.y -= 1;
-
-    // 카메라 방향에 맞춰 이동
-    if (direction.length() > 0) {
-        direction.normalize();
-        direction.applyQuaternion(camera.quaternion);
-        velocity.add(direction.multiplyScalar(config.moveSpeed));
     }
 
-    // 속도 제한
-    const speed = velocity.length();
-    if (speed > config.maxSpeed) {
-        velocity.normalize().multiplyScalar(config.maxSpeed);
+    renderAsteroid(obj, projected, scale) {
+        const size = obj.size * scale;
+        if (size < 0.5) return;
+
+        this.ctx.fillStyle = obj.color;
+        this.ctx.globalAlpha = 0.8;
+
+        // 불규칙한 모양 그리기
+        this.ctx.beginPath();
+        const points = 6 + obj.shape * 2;
+        for (let i = 0; i < points; i++) {
+            const angle = (i / points) * Math.PI * 2 + obj.rotation.x;
+            const radius = size * (0.7 + Math.sin(angle * 3 + obj.rotation.y) * 0.3);
+            const x = projected.x + Math.cos(angle) * radius;
+            const y = projected.y + Math.sin(angle) * radius;
+            if (i === 0) {
+                this.ctx.moveTo(x, y);
+            } else {
+                this.ctx.lineTo(x, y);
+            }
+        }
+        this.ctx.closePath();
+        this.ctx.fill();
+
+        this.ctx.globalAlpha = 1;
     }
 
-    // 마찰 적용
-    velocity.multiplyScalar(config.friction);
+    renderNebula(obj, projected, scale) {
+        const size = obj.size * scale;
+        if (size < 5) return;
 
-    // 위치 업데이트
-    camera.position.add(velocity);
+        // 성운 효과 (여러 겹의 그라데이션)
+        this.ctx.globalAlpha = 0.05;
 
-    // UI 업데이트
-    updateUI();
-}
+        for (let i = 0; i < 3; i++) {
+            const offsetX = Math.sin(obj.rotation.x + i) * size * 0.2;
+            const offsetY = Math.cos(obj.rotation.y + i) * size * 0.2;
 
-// UI 업데이트
-function updateUI() {
-    const speed = velocity.length().toFixed(2);
-    const pos = camera.position;
+            const gradient = this.ctx.createRadialGradient(
+                projected.x + offsetX, projected.y + offsetY, 0,
+                projected.x + offsetX, projected.y + offsetY, size * (1 + i * 0.3)
+            );
+            gradient.addColorStop(0, obj.color);
+            gradient.addColorStop(0.5, obj.color + '44');
+            gradient.addColorStop(1, obj.color + '00');
 
-    document.getElementById('speed').textContent = speed;
-    document.getElementById('position').textContent =
-        `${pos.x.toFixed(0)}, ${pos.y.toFixed(0)}, ${pos.z.toFixed(0)}`;
-}
+            this.ctx.fillStyle = gradient;
+            this.ctx.beginPath();
+            this.ctx.arc(projected.x + offsetX, projected.y + offsetY, size * (1 + i * 0.3), 0, Math.PI * 2);
+            this.ctx.fill();
+        }
 
-// 애니메이션
-function animate() {
-    requestAnimationFrame(animate);
+        this.ctx.globalAlpha = 1;
+    }
 
-    // 움직임 업데이트
-    updateMovement();
+    animate(currentTime) {
+        requestAnimationFrame((time) => this.animate(time));
 
-    // 행성 회전
-    planets.forEach(planet => {
-        planet.rotation.x += planet.userData.rotationSpeed.x;
-        planet.rotation.y += planet.userData.rotationSpeed.y;
-        planet.rotation.z += planet.userData.rotationSpeed.z;
-    });
+        // FPS 계산
+        this.frameCount++;
+        if (currentTime - this.lastFpsUpdate > 1000) {
+            this.fps = this.frameCount;
+            this.frameCount = 0;
+            this.lastFpsUpdate = currentTime;
+            document.getElementById('fpsValue').textContent = this.fps;
+        }
 
-    // 소행성 회전
-    asteroids.forEach(asteroid => {
-        asteroid.rotation.x += asteroid.userData.rotationSpeed.x;
-        asteroid.rotation.y += asteroid.userData.rotationSpeed.y;
-        asteroid.rotation.z += asteroid.userData.rotationSpeed.z;
-    });
+        // 객체 업데이트
+        for (const obj of this.objects) {
+            obj.update();
+        }
 
-    // 렌더링
-    renderer.render(scene, camera);
+        // 카메라 업데이트
+        this.updateCamera();
+
+        // 렌더링
+        this.render();
+
+        this.lastTime = currentTime;
+    }
 }
 
 // 게임 시작
-window.addEventListener('load', init);
+window.addEventListener('load', () => {
+    const game = new Game();
+    window.game = game; // 디버깅용
+});
